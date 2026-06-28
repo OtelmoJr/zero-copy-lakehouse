@@ -1,48 +1,50 @@
+**English** · [Português](README.pt-BR.md)
+
 # Zero-Copy Data Mesh
 
 Iceberg · Nessie · Trino · MinIO · Dagster
 
-A ideia aqui é simples de explicar e chata de fazer direito: e se vários times
-pudessem publicar e consultar dados uns dos outros **sem ficar copiando tabela
-pra todo lado**? É isso que esse projeto monta — um data mesh onde o dado vive
-uma vez só num data lake, o Trino consulta qualquer domínio na hora da query, e
-o Nessie versiona o dado como se fosse git (com branch, merge e rollback de
-verdade).
+The idea is easy to pitch and annoying to get right: what if several teams could
+publish and query each other's data **without copying tables all over the place**?
+That's what this project builds — a data mesh where data lives in a single data
+lake, Trino queries any domain at query time, and Nessie versions the data like
+git (with real branch, merge and rollback).
 
-Tudo sobe com um `docker compose up`. Não precisa de conta em nuvem nem cartão
-de crédito — roda inteiro na sua máquina.
+The whole thing comes up with one `docker compose up`. No cloud account, no credit
+card — it runs entirely on your machine.
 
-Montei isso como projeto de portfólio, mas não parei no "compila". Subi a stack
-toda, rodei os quatro cenários de ponta a ponta e, no caminho, achei (e corrigi)
-três bugs que só apareceram com tudo de pé. Os resultados abaixo são reais.
+I built this as a portfolio project, but I didn't stop at "it compiles." I brought
+the whole stack up, ran the four scenarios end to end and, along the way, found
+(and fixed) three bugs that only showed up with everything running. The results
+below are real.
 
-## Por que isso é interessante
+## Why this is interesting
 
-O ETL tradicional copia dados entre times o tempo todo: o time de analytics
-puxa uma cópia da tabela de vendas, que puxa uma cópia da de marketing, e quando
-você vê tem o mesmo dado em cinco lugares, cinco pipelines pra manter e ninguém
-sabe qual versão é a certa. A proposta de data mesh + formato aberto (Iceberg) é
-cortar isso na raiz.
+Traditional ETL copies data between teams constantly: the analytics team pulls a
+copy of the sales table, which pulls a copy of marketing's, and before you know it
+the same data lives in five places, with five pipelines to maintain and nobody
+sure which version is the source of truth. Data mesh on an open format (Iceberg)
+is about cutting that at the root.
 
-Quatro coisas que eu queria mostrar funcionando:
+Four things I wanted to see actually working:
 
-- **Consulta entre domínios sem cópia.** A tabela `analytics.revenue_by_campaign`
-  cruza `sales` com `marketing` num JOIN — dois domínios, uma query, zero dado
-  duplicado. O Trino lê os arquivos onde eles já estão.
-- **Dado como código.** O pipeline escreve num *branch* do Nessie, valida ali, e
-  só faz merge na `main` se passar. Se o dado vier ruim, é só descartar o branch.
-  Mesma vibe de um PR que você não dá merge.
-- **Otimização que vira economia.** Particionamento escondido por dia, compaction
-  e ordenação reduzem quantos arquivos o Trino precisa abrir num scan — que na
-  nuvem é dinheiro direto.
-- **Qualidade na hora de escrever.** Great Expectations roda como check bloqueante
-  no Dagster. Dado que não passa simplesmente não chega na `main`.
+- **Cross-domain queries with no copy.** The `analytics.revenue_by_campaign` table
+  joins `sales` with `marketing` — two domains, one query, zero duplicated data.
+  Trino reads the files where they already live.
+- **Data as code.** The pipeline writes to a Nessie *branch*, validates there, and
+  only merges into `main` if it passes. If the data comes in bad, you just throw
+  the branch away. Same vibe as a PR you decide not to merge.
+- **Optimization that turns into savings.** Hidden partitioning by day, compaction
+  and sorting reduce how many files Trino has to open in a scan — which in the
+  cloud is money straight up.
+- **Quality at write time.** Great Expectations runs as a blocking check in
+  Dagster. Data that doesn't pass simply never reaches `main`.
 
-## Como as peças se encaixam
+## How the pieces fit together
 
 ```mermaid
 flowchart LR
-    subgraph Domains["Domínios (produtores)"]
+    subgraph Domains["Domains (producers)"]
         S[sales.orders CSV]
         M[marketing.campaigns CSV]
     end
@@ -55,83 +57,85 @@ flowchart LR
         I[(Apache Iceberg\nParquet + metadata)]
     end
 
-    N[Nessie\ncatálogo git-like\nmain / etl_branch]
-    T[Trino\nengine de query federada]
+    N[Nessie\ngit-like catalog\nmain / etl_branch]
+    T[Trino\nfederated query engine]
 
     S --> A
     M --> A
-    A -->|escreve| I
+    A -->|writes| I
     A -. branch/merge/rollback .-> N
-    T <-->|metadados de tabela/branch| N
-    T <-->|lê/escreve dados| I
+    T <-->|table/branch metadata| N
+    T <-->|reads/writes data| I
     T -->|cross-domain JOIN, zero-copy| Gold[analytics.revenue_by_campaign]
 ```
 
-O truque do "zero-copy" está em quem faz o quê. Quem escreve e lê os arquivos no
-S3 é o Trino; o Nessie só guarda ponteiros pra esses arquivos. Quando você cria
-um branch, ele não duplica nada — aponta pros mesmos arquivos da `main` e só
-escreve coisa nova no que de fato mudou (copy-on-write). E os domínios nunca
-trocam cópias entre si: o JOIN só existe no instante da consulta.
+The "zero-copy" trick is about who does what. Trino is the one writing and reading
+the files on S3; Nessie only keeps pointers to those files. When you create a
+branch, it doesn't duplicate anything — it points at the same files as `main` and
+only writes new data where something actually changed (copy-on-write). And the
+domains never swap copies with each other: the JOIN only exists at the moment of
+the query.
 
-| Peça | O que faz |
+| Piece | What it does |
 |---|---|
-| **MinIO** | armazenamento S3-compatible — o data lake propriamente dito |
-| **Apache Iceberg** | formato de tabela com snapshots, particionamento escondido e time-travel |
-| **Project Nessie** | catálogo com versionamento estilo git (branch, merge, rollback) |
-| **Trino** | engine de query distribuída que enxerga todos os domínios |
-| **Dagster** | orquestração, com lineage e checks de qualidade nos assets |
-| **Great Expectations** | as regras de qualidade que rodam antes de publicar |
+| **MinIO** | S3-compatible object storage — the data lake itself |
+| **Apache Iceberg** | table format with snapshots, hidden partitioning and time-travel |
+| **Project Nessie** | catalog with git-style versioning (branch, merge, rollback) |
+| **Trino** | distributed query engine that sees every domain |
+| **Dagster** | orchestration, with lineage and quality checks on the assets |
+| **Great Expectations** | the quality rules that run before publishing |
 
-## Rodando na sua máquina
+## Running it locally
 
-Só precisa de Docker com Compose.
+All you need is Docker with Compose.
 
 ```bash
-# 1. Sobe tudo (na primeira vez ele builda a imagem do Dagster)
+# 1. Bring everything up (first run builds the Dagster image)
 docker compose up -d --build
 
-# 2. Confere se ficou tudo de pé (leva ~1-2 min)
+# 2. Check it's all healthy (takes ~1-2 min)
 docker compose ps
 
-# 3. Popula a main: materializa os assets (sales, marketing, analytics)
+# 3. Populate main: materialize the assets (sales, marketing, analytics)
 docker compose exec dagster dagster asset materialize --select '*' -m data_mesh
 
-# 4. Roda a demo de "dado como código" (branch -> valida -> merge ou rollback)
+# 4. Run the "data as code" demo (branch -> validate -> merge or rollback)
 docker compose exec dagster python -m data_mesh.demo
 
-# 5. Abre o Trino e consulta os domínios cruzados
+# 5. Open Trino and query the domains together
 docker compose exec -it trino trino
 #   trino> SELECT * FROM iceberg.analytics.revenue_by_campaign ORDER BY revenue DESC;
 ```
 
-As interfaces web ficam aqui:
+The web UIs live here:
 
-| Serviço | URL |
+| Service | URL |
 |---|---|
 | Dagster | http://localhost:3000 |
 | Trino | http://localhost:8085 |
-| MinIO | http://localhost:9001 (usuário e senha: `minioadmin`) |
+| MinIO | http://localhost:9001 (user and password: `minioadmin`) |
 | Nessie | http://localhost:19120/api/v2/trees |
 
-Se você estiver no Windows sem `make`, é só usar os comandos `docker compose`
-acima. Com `make` instalado, dá pra encurtar: `make up`, `make seed`, `make demo`,
+On Windows without `make`, just use the `docker compose` commands above. With
+`make` installed you can shorten things: `make up`, `make seed`, `make demo`,
 `make query`.
 
-## Os quatro cenários, na prática
+## The four scenarios, in practice
 
-**1. Cruzando domínios sem cópia.**
-[`sql/10_cross_domain_query.sql`](sql/10_cross_domain_query.sql) junta
-`sales.orders` com `marketing.campaigns` e devolve receita e ROI por campanha. O
-asset `analytics.revenue_by_campaign` é exatamente esse JOIN materializado como
-camada gold. Nenhum byte foi copiado de um domínio pro outro.
+**1. Crossing domains with no copy.**
+[`sql/10_cross_domain_query.sql`](sql/10_cross_domain_query.sql) joins
+`sales.orders` with `marketing.campaigns` and returns revenue and ROI per campaign.
+The `analytics.revenue_by_campaign` asset is exactly that JOIN materialized as a
+gold layer. Not a single byte was copied from one domain to the other.
 
-**2. Dado como código (write-audit-publish).**
-Rodando [`python -m data_mesh.demo`](orchestration/data_mesh/demo.py) você vê o
-fluxo inteiro. Primeiro um lote propositalmente ruim (amount negativo e
-`campaign_id` nulo): ele é escrito num branch isolado, o Great Expectations
-reprova, e o branch é descartado — a `main` nem fica sabendo. Depois um lote bom:
-passa na validação e é mergeado de forma atômica na `main`. Foi essa a saída
-real da última execução:
+**2. Data as code (write-audit-publish).**
+Running [`python -m data_mesh.demo`](orchestration/data_mesh/demo.py) shows the
+whole flow. First a deliberately bad batch (negative amount and null
+`campaign_id`): it's written to an isolated branch, Great Expectations rejects it,
+and the branch is discarded — `main` never even hears about it. Then a good batch:
+it passes validation and gets merged atomically into `main`. This was the actual
+output from the last run (the log labels are in Portuguese — `RUIM` = bad,
+`BOM` = good):
 
 ```
 main.orders ANTES = 400
@@ -150,65 +154,65 @@ main.orders ANTES = 400
 main.orders DEPOIS = 403  (delta = 3)
 ```
 
-O mesmo fluxo também existe como job no Dagster (`data_as_code_job`), se você
-preferir disparar pela interface.
+The same flow also exists as a Dagster job (`data_as_code_job`) if you'd rather
+trigger it from the UI.
 
-**3. Particionamento escondido e compaction.**
+**3. Hidden partitioning and compaction.**
 [`sql/20_partitioning_and_optimize.sql`](sql/20_partitioning_and_optimize.sql)
-mostra o `EXPLAIN` cortando partições por `order_ts` sem você ter criado nenhuma
-coluna de partição na mão — o Iceberg cuida disso. Em seguida `optimize` e
-`sorted_by` reorganizam os arquivos pra reduzir o I/O dos scans.
+shows the `EXPLAIN` pruning partitions by `order_ts` without you ever creating a
+partition column by hand — Iceberg handles it. Then `optimize` and `sorted_by`
+reorganize the files to cut down the I/O of scans.
 
-**4. Qualidade antes de publicar.**
-Os assets de `sales` e `marketing` carregam asset checks bloqueantes com Great
-Expectations. Se a suíte falha, o dado não vai pra `main` e o asset de analytics
-nem chega a rodar — dá pra ver isso direitinho no grafo do Dagster.
+**4. Quality before publishing.**
+The `sales` and `marketing` assets carry blocking asset checks with Great
+Expectations. If the suite fails, the data doesn't go to `main` and the analytics
+asset doesn't even run — you can see this clearly in the Dagster graph.
 
-## O que isso não é (sendo honesto)
+## What this is not (being honest)
 
-Nenhum projeto de portfólio é produção, e tem decisões aqui que eu tomei pra
-caber numa máquina e numa tarde:
+No portfolio project is production, and there are decisions here I made to fit a
+single machine and an afternoon:
 
-- O Nessie está em modo `IN_MEMORY`, então os branches somem quando você dá
-  `docker compose down`. Pra persistir é trocar por `ROCKSDB` com volume — deixei
-  comentado no [docker-compose.yml](docker-compose.yml).
-- Tratei cada domínio como um schema (`sales`, `marketing`) no mesmo catálogo. É
-  um padrão válido de mesh sobre um lake; pra isolamento de governança mais sério,
-  daria pra ter um catálogo Trino por domínio.
-- A ingestão é via `INSERT` porque os volumes são pequenos e didáticos. Em escala
-  real isso seria Spark ou PyIceberg.
-- Sobre Z-Order: o Trino faz compaction com `sorted_by` (ordenação linear). O
-  Z-Order de verdade do Iceberg (curva de Morton/Hilbert) vem via Spark
-  `rewrite_data_files(strategy => 'sort', sort_order => 'zorder(...)')`. Deixei o
-  snippet em [sql/20](sql/20_partitioning_and_optimize.sql) — o efeito de negócio
-  (ler menos arquivo em filtro multi-coluna) é o mesmo.
+- Nessie runs in `IN_MEMORY` mode, so branches disappear when you run
+  `docker compose down`. To persist, switch it to `ROCKSDB` with a volume — I left
+  it commented in the [docker-compose.yml](docker-compose.yml).
+- I treated each domain as a schema (`sales`, `marketing`) in the same catalog.
+  It's a valid mesh-on-a-lake pattern; for stricter governance isolation you could
+  have one Trino catalog per domain.
+- Ingestion is via `INSERT` because the volumes are small and didactic. At real
+  scale this would be Spark or PyIceberg.
+- On Z-Order: Trino does compaction with `sorted_by` (linear ordering). True
+  Iceberg Z-Order (Morton/Hilbert curve) comes via Spark
+  `rewrite_data_files(strategy => 'sort', sort_order => 'zorder(...)')`. I left the
+  snippet in [sql/20](sql/20_partitioning_and_optimize.sql) — the business effect
+  (reading fewer files on multi-column filters) is the same.
 
-## Para onde isso poderia ir
+## Where this could go
 
-Se eu fosse continuar, os próximos passos óbvios seriam: persistir o Nessie e
-ligar autenticação; separar catálogos por domínio; trocar a ingestão por
-Spark/PyIceberg com CDC; formalizar contratos de dados (ODCS) com alertas; e um
-CI que sobe a stack e roda esses quatro cenários como teste de integração.
+If I were to keep going, the obvious next steps would be: persist Nessie and turn
+on authentication; split catalogs per domain; swap ingestion for Spark/PyIceberg
+with CDC; formalize data contracts (ODCS) with alerts; and a CI that brings the
+stack up and runs these four scenarios as an integration test.
 
-## Estrutura do repositório
+## Repository layout
 
 ```
 zero-copy-lakehouse/
 ├── docker-compose.yml            # MinIO + Nessie + Trino + Dagster
 ├── infra/trino/catalog/
-│   ├── iceberg.properties        # catálogo -> branch main
-│   └── iceberg_dev.properties    # catálogo -> branch etl_branch
-├── data/                         # dados seed dos domínios (CSV)
+│   ├── iceberg.properties        # catalog -> main branch
+│   └── iceberg_dev.properties    # catalog -> etl_branch branch
+├── data/                         # domain seed data (CSV)
 │   ├── sales/orders.csv
 │   └── marketing/campaigns.csv
-├── orchestration/                # projeto Dagster
+├── orchestration/                # Dagster project
 │   └── data_mesh/
 │       ├── assets/               # sales, marketing, analytics (cross-domain)
 │       ├── quality/expectations.py
-│       ├── nessie.py             # cliente REST v2 (branch/merge/delete)
-│       ├── trino_io.py           # acesso ao Trino
-│       ├── demo.py               # demo data-as-code
-│       └── definitions.py        # Definitions do Dagster
-├── sql/                          # queries de exploração (Trino CLI)
-└── scripts/generate_seed_data.py # gera os CSVs (determinístico)
+│       ├── nessie.py             # REST v2 client (branch/merge/delete)
+│       ├── trino_io.py           # Trino access
+│       ├── demo.py               # data-as-code demo
+│       └── definitions.py        # Dagster Definitions
+├── sql/                          # exploration queries (Trino CLI)
+└── scripts/generate_seed_data.py # generates the CSVs (deterministic)
 ```

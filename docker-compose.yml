@@ -75,7 +75,7 @@ services:
     image: trinodb/trino:468
     container_name: lakehouse-trino
     ports:
-      - "8080:8080"   # UI + JDBC/CLI (http://localhost:8080)
+      - "8085:8080"   # UI + JDBC/CLI (http://localhost:8085) — 8080 evitado p/ conflito
     depends_on:
       minio:
         condition: service_healthy

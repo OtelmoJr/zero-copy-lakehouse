@@ -38,14 +38,15 @@ class NessieClient:
 
     # -------------------------------------------------------------- mutations
     def create_branch(self, name: str, from_ref: str = "main") -> dict:
+        # v2: `name` e `type` vão como query params; o body é a referência de origem.
         src = self.get_reference(from_ref)
-        body = {
-            "type": "BRANCH",
-            "name": name,
-            "hash": src["hash"],
-            "reference": {"type": "BRANCH", "name": from_ref, "hash": src["hash"]},
-        }
-        r = requests.post(f"{self.base}/trees", json=body, timeout=self.timeout)
+        body = {"type": "BRANCH", "name": from_ref, "hash": src["hash"]}
+        r = requests.post(
+            f"{self.base}/trees",
+            params={"name": name, "type": "BRANCH"},
+            json=body,
+            timeout=self.timeout,
+        )
         r.raise_for_status()
         data = r.json()
         return data.get("reference", data)
@@ -59,11 +60,14 @@ class NessieClient:
     def merge_branch(self, from_branch: str, into: str = "main", message: str | None = None) -> dict:
         """Publica (merge) os commits de from_branch em `into` de forma atômica."""
         src = self.get_reference(from_branch)
+        target = self.get_reference(into)  # hash esperado do target vai no path
         body = {"fromRefName": from_branch, "fromHash": src["hash"]}
         if message:
             body["message"] = message
         r = requests.post(
-            f"{self.base}/trees/{into}/history/merge", json=body, timeout=self.timeout
+            f"{self.base}/trees/{into}@{target['hash']}/history/merge",
+            json=body,
+            timeout=self.timeout,
         )
         r.raise_for_status()
         return r.json()

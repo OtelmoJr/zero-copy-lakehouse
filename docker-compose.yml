@@ -1,0 +1,124 @@
+# Zero-Copy Data Mesh — Iceberg + Nessie + Trino + MinIO + Dagster
+# Tudo roda 100% local. Nenhum custo de nuvem.
+#
+#   MinIO    -> object storage S3-compatible (o "data lake")
+#   Nessie   -> catálogo Iceberg com semântica git (branch / merge / rollback)
+#   Trino    -> engine de query distribuída (SQL federado, zero-copy)
+#   Dagster  -> orquestração + Great Expectations (qualidade no write)
+
+name: zero-copy-lakehouse
+
+services:
+  # ---------------------------------------------------------------------------
+  # MinIO — armazenamento de objetos S3-compatible
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: lakehouse-minio
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console web (http://localhost:9001)
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_REGION: us-east-1
+      MINIO_DOMAIN: minio
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [lakehouse]
+
+  # Cria o bucket "warehouse" no boot e encerra.
+  minio-init:
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    container_name: lakehouse-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin} &&
+      mc mb --ignore-existing local/warehouse &&
+      echo 'Bucket warehouse pronto.';
+      "
+    networks: [lakehouse]
+
+  # ---------------------------------------------------------------------------
+  # Nessie — catálogo Iceberg transacional com branches git-like
+  # ---------------------------------------------------------------------------
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.99.0
+    container_name: lakehouse-nessie
+    ports:
+      - "19120:19120"
+    environment:
+      # In-memory: simples e sempre funciona. Branches reiniciam no `down`.
+      # Para persistir entre reinícios, troque por ROCKSDB + volume.
+      NESSIE_VERSION_STORE_TYPE: IN_MEMORY
+      QUARKUS_HTTP_PORT: "19120"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "exec 3<>/dev/tcp/localhost/19120"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [lakehouse]
+
+  # ---------------------------------------------------------------------------
+  # Trino — engine de query (Iceberg connector apontando para o Nessie)
+  # ---------------------------------------------------------------------------
+  trino:
+    image: trinodb/trino:468
+    container_name: lakehouse-trino
+    ports:
+      - "8080:8080"   # UI + JDBC/CLI (http://localhost:8080)
+    depends_on:
+      minio:
+        condition: service_healthy
+      nessie:
+        condition: service_healthy
+    volumes:
+      # Só montamos os catálogos; o resto do /etc/trino é o default da imagem.
+      - ./infra/trino/catalog:/etc/trino/catalog
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [lakehouse]
+
+  # ---------------------------------------------------------------------------
+  # Dagster — orquestração (assets, asset checks com Great Expectations)
+  # ---------------------------------------------------------------------------
+  dagster:
+    build: ./orchestration
+    container_name: lakehouse-dagster
+    ports:
+      - "3000:3000"   # UI do Dagster (http://localhost:3000)
+    depends_on:
+      trino:
+        condition: service_healthy
+      nessie:
+        condition: service_healthy
+    environment:
+      TRINO_HOST: trino
+      TRINO_PORT: "8080"
+      TRINO_USER: dagster
+      NESSIE_URI: http://nessie:19120/api/v2
+      DAGSTER_HOME: /opt/dagster/home
+    volumes:
+      - ./orchestration:/opt/dagster/app
+      - ./data:/opt/dagster/app/data:ro
+    command: dagster dev -h 0.0.0.0 -p 3000
+    networks: [lakehouse]
+
+volumes:
+  minio-data:
+
+networks:
+  lakehouse:
+    driver: bridge

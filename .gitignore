@@ -1,0 +1,24 @@
+# Env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Dagster
+orchestration/home/
+tmp_dagster_home_*/
+.dagster/
+
+# Great Expectations (artefatos locais gerados)
+orchestration/gx/uncommitted/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

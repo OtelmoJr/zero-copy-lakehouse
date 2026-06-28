@@ -1,0 +1,16 @@
+[project]
+name = "data_mesh"
+version = "0.1.0"
+description = "Zero-Copy Data Mesh — orquestração Dagster (Iceberg + Nessie + Trino)"
+requires-python = ">=3.10"
+
+[tool.dagster]
+module_name = "data_mesh"
+code_location_name = "zero_copy_data_mesh"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["data_mesh*"]

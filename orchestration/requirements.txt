@@ -1,0 +1,6 @@
+dagster>=1.9,<1.10
+dagster-webserver>=1.9,<1.10
+trino>=0.330
+great-expectations>=1.3,<2
+pandas>=2.0,<3
+requests>=2.31

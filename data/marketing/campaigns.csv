@@ -1,0 +1,9 @@
+campaign_id,campaign_name,channel,start_date,end_date,budget
+CMP-001,Summer Launch,paid_search,2024-01-01,2024-02-15,50000
+CMP-002,Back to Work,social,2024-01-31,2024-03-16,30000
+CMP-003,Black Friday,email,2024-03-01,2024-04-15,80000
+CMP-004,New Year Deals,display,2024-03-31,2024-05-15,25000
+CMP-005,Spring Refresh,affiliate,2024-04-30,2024-06-14,15000
+CMP-006,Pro Bundle,paid_search,2024-05-30,2024-07-14,45000
+CMP-007,Student Promo,social,2024-06-29,2024-08-13,12000
+CMP-008,Loyalty Rewards,email,2024-07-29,2024-09-12,20000
